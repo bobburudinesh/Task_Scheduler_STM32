@@ -59,7 +59,9 @@ void enable_Sys_Tick_Timer(void);
 void pend_PendSV(void);
 void unblock_tasks(void);
 void increment_Tick(void);
+void get_next_task_to_run(void);
 
+__attribute__((naked))void PendSV_Handler(void);
 __attribute__((naked))void scheduler_Stack_Init(uint32_t stack_start);
 __attribute((naked))void switch_sp_to_psp(void);
 
@@ -227,6 +229,43 @@ void unblock_tasks(void) {
 			}
 		}
 	}
+}
+
+void get_next_task_to_run(void) {
+	Task_States_t state;
+	for(int i = 0; i< MAX_TASKS; i++) {
+		current_Task++;
+		current_Task = current_Task % MAX_TASKS;
+		state = user_Tasks[i].task_State;
+		if(state == ready && (current_Task != 0)){
+			break;
+		}
+	}
+	if(state == blocked) {
+		current_Task = 0;
+	}
+}
+
+__attribute__((naked))void PendSV_Handler(void) {
+	// Get current running task PSP
+	__asm volatile("PUSH {LR}");
+	__asm volatile("MRS R0, PSP");
+	// Push R4-R11 to the task stack to save context of this task
+	__asm volatile("STMDB R0!,{R4-R11}");
+	// Save this PSP to task's TCB top of stack variable
+	__asm volatile("BL save_current_task_psp");
+
+	// get the next task to run
+	__asm volatile("BL get_next_task_to_run");
+	// Get the PSP of this task
+	__asm volatile("BL get_current_task_psp");
+	// Restore the context of this new task
+	__asm volatile("LDMIA R0!, {R4-R11}");
+	// Save this task stack pointer value to PSP
+	__asm volatile("BL save_current_task_psp");
+
+	__asm volatile("POP {LR}");
+	__asm volatile("BX LR");
 }
 
 // Stack pointer related functions START
